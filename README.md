@@ -298,3 +298,12 @@ The models directory can be overridden with the `MODELS_DIR` environment variabl
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## Hailo-8L Compatibility
+
+This setup has been extended to support the **Hailo-8L** architecture (such as the one bundled with Raspberry Pi 5 AI Kits). The standard setup script compiles the application securely against Python 3.13 utilizing `opencv-python-headless` instead of `python3-opencv` via `apt` to prevent strict dependency module breakdown.
+
+### `setup.sh` Changes:
+*   Updated `HEF_BASE` arrays to target `/hailo8l` instead of the original `/hailo8` compilation endpoints.
+*   Updated the TinyCLIP encoding arrays and PaddleOCR variables to pull from Hailo's `v2.18.0` endpoints (resolving a 404 access denial on the older `v2.17.0` directories).
+*   Correctly separated the 6 downloading stages to guarantee all AI HEF models securely provision before Dockerizing the system tests.

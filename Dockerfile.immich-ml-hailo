@@ -4,13 +4,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     ffmpeg \
     libglib2.0-0 libsm6 libxext6 libxrender1 \
-    python3-opencv \
     nano wget curl jq \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --break-system-packages \
-    fastapi uvicorn[standard] python-multipart pillow requests \
-    pyclipper shapely
+RUN pip3 install \
+    fastapi "uvicorn[standard]" python-multipart pillow requests \
+    pyclipper shapely opencv-python-headless
 
 WORKDIR /app
 

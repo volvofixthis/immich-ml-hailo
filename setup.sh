@@ -39,7 +39,7 @@ esac
 echo "  Platform: $ARCH -> deb=$DEB_ARCH whl=$WHL_ARCH"
 
 DEB_FILE="hailo-rt-4/hailort_${HAILORT_VERSION}_${DEB_ARCH}.deb"
-WHL_FILE="hailo-rt-4/hailort-${HAILORT_VERSION}-cp312-cp312-linux_${WHL_ARCH}.whl"
+WHL_FILE="hailo-rt-4/hailort-${HAILORT_VERSION}-cp313-cp313-linux_${WHL_ARCH}.whl"
 
 MISSING=()
 for f in "$DEB_FILE" "$WHL_FILE"; do
@@ -91,8 +91,8 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo ""
     echo "  $(red "Missing ${#MISSING[@]} model file(s):")"
 
-    HEF_BASE="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.17.0/hailo8"
-    HEF_BASE_V218="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.18.0/hailo8"
+    HEF_BASE="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.17.0/hailo8l"
+    HEF_BASE_V218="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.18.0/hailo8l"
     BPE_URL="https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz"
     DICT_URL="https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/ppocrv5_dict.txt"
 
@@ -100,9 +100,9 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     DOWNLOADS=()
     for f in "${MISSING[@]}"; do
         case "$f" in
-            scrfd_2.5g.hef|arcface_r50.hef|tinyclip_*)
+            scrfd_2.5g.hef|arcface_r50.hef)
                 DOWNLOADS+=("$f|$HEF_BASE/$f") ;;
-            paddle_ocr_*)
+            tinyclip_*|paddle_ocr_*)
                 DOWNLOADS+=("$f|$HEF_BASE_V218/$f") ;;
             bpe_simple_vocab_16e6.txt.gz)
                 DOWNLOADS+=("$f|$BPE_URL") ;;
