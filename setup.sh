@@ -185,6 +185,17 @@ ok "$IMAGE_APP"
 
 step 6 "Running tests"
 
+if [[ "${SKIP_HAILO_TESTS:-0}" == "1" || "$(hailortcli scan 2>/dev/null || true)" != *"Hailo Devices:"* ]]; then
+    if [[ "${SKIP_HAILO_TESTS:-0}" != "1" ]]; then
+        echo "  $(yellow 'Skipping runtime tests: HailoRT cannot detect a device.')"
+        echo "  Diagnostic command: hailortcli scan"
+    else
+        echo "  Runtime tests disabled with SKIP_HAILO_TESTS=1."
+    fi
+    echo "  Images were built successfully."
+    exit 0
+fi
+
 if [[ ! -f "$TEST_IMAGE" ]]; then
     echo "  $(red 'Test image not found:')" "$TEST_IMAGE"
     echo "  Skipping tests. Provide a test image to run them:"
@@ -192,7 +203,7 @@ if [[ ! -f "$TEST_IMAGE" ]]; then
     echo ""
     bold "Setup complete (tests skipped)."; echo ""
     echo "Run the container with:"
-    echo "  docker run -itd --device=/dev/hailo0:/dev/hailo0 --group-add=0 -p 3003:3003 $IMAGE_APP"
+    echo "  docker run -itd --privileged -v /sys:/sys:ro -v /dev:/dev -p 3003:3003 $IMAGE_APP"
     exit 0
 fi
 
@@ -208,8 +219,9 @@ fi
 CONTAINER_NAME="immich-ml-setup-test-$$"
 echo "  Starting test container: $CONTAINER_NAME"
 if ! docker run -d \
-    --device=/dev/hailo0:/dev/hailo0 \
-    --group-add=0 \
+    --privileged \
+    -v /sys:/sys:ro \
+    -v /dev:/dev \
     -p 3003:3003 \
     --name "$CONTAINER_NAME" \
     "$IMAGE_APP"; then
