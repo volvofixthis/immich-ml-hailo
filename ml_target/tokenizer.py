@@ -151,4 +151,7 @@ class Siglip2Tokenizer:
             ids[-1] = 1  # SigLIP2's <eos> token
         if len(ids) < context_length:
             ids.extend([0] * (context_length - len(ids)))
+            # The Hailo text HEF pools the fixed final sequence position.
+            # Keep EOS at that position rather than leaving padding there.
+            ids[-1] = 1
         return np.asarray(ids, dtype=np.int32)
