@@ -174,23 +174,20 @@ def prep_clip_text_input(
 def prep_siglip2_text_input(
     token_ids: np.ndarray,
     token_embedding: np.ndarray,
-    positional_embedding: np.ndarray,
     qp_scale: float,
     qp_zp: float,
 ) -> np.ndarray:
-    """Build and quantize the 1x64x768 input to the SigLIP2 text HEF."""
+    """Build the token-embedding input to the SigLIP2 text HEF."""
     if token_ids.shape != (64,):
         raise ValueError(f"token_ids must be (64,), got {token_ids.shape}")
     if token_embedding.ndim != 2 or token_embedding.shape[1] != 768:
         raise ValueError(f"unexpected token embedding shape: {token_embedding.shape}")
-    if positional_embedding.shape != (64, 768):
-        raise ValueError(
-            f"unexpected positional embedding shape: {positional_embedding.shape}"
-        )
     if qp_scale <= 0:
         raise ValueError(f"quantization scale must be positive, got {qp_scale}")
 
-    x = token_embedding[token_ids] + positional_embedding
+    # The Hailo graph starts at the model's embeddings/Add node and contains
+    # the positional embedding internally. Adding it here would double it.
+    x = token_embedding[token_ids]
     x_u16 = np.clip(np.round(x / qp_scale + qp_zp), 0, 65535).astype(np.uint16)
     return np.ascontiguousarray(x_u16[None, ...], dtype=np.uint16)
 

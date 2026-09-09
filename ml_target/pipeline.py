@@ -387,7 +387,6 @@ def _run_clip(
             xb = prep_siglip2_text_input(
                 token_ids,
                 _PIPE.token_embedding,
-                _PIPE.positional_embedding,
                 qp_scale=_PIPE.clip_txt.input_qp_scale
                 or tc.qp_scale
                 or _missing_quant("SIGLIP2_TEXT_QP_SCALE"),
