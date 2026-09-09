@@ -222,6 +222,7 @@ if ! docker run -d \
     --privileged \
     -v /sys:/sys:ro \
     -v /dev:/dev \
+    -v "$SCRIPT_DIR/models:/app/models:ro" \
     -p 3003:3003 \
     --name "$CONTAINER_NAME" \
     "$IMAGE_APP"; then

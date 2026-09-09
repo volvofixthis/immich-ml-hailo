@@ -1,0 +1,24 @@
+services:
+  immich-ml-hailo:
+    build:
+      context: .
+      dockerfile: Dockerfile.immich-ml-hailo
+    image: immich-ml-hailo:v5.3.0
+    container_name: immich-ml-hailo
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "3003:3003"
+    environment:
+      CLIP_BACKEND: siglip2
+      MODELS_DIR: /app/models
+    volumes:
+      - /sys:/sys:ro
+      - /dev:/dev
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s

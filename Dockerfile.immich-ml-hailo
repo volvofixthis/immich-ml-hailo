@@ -18,7 +18,6 @@ ENV PYTHONUNBUFFERED=1 \
     CLIP_BACKEND=siglip2
 
 COPY ml_target/ ml_target/
-COPY models/ models/
 
 EXPOSE 3003
 
