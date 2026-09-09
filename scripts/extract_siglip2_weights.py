@@ -17,10 +17,20 @@ IMMICH_BASE = (
 
 
 def download(url: str, path: str) -> None:
-    if os.path.exists(path):
+    if os.path.exists(path) and os.path.getsize(path) > 1024:
         return
+    if os.path.exists(path):
+        os.unlink(path)
     print(f"Downloading {url}")
-    urllib.request.urlretrieve(url, path)
+    temporary = f"{path}.download"
+    urllib.request.urlretrieve(url, temporary)
+    size = os.path.getsize(temporary)
+    if size <= 1024:
+        with open(temporary, "rb") as handle:
+            preview = handle.read(128)
+        os.unlink(temporary)
+        raise RuntimeError(f"Downloaded invalid asset ({size} bytes): {preview!r}")
+    os.replace(temporary, path)
 
 
 def main() -> None:

@@ -50,7 +50,25 @@ def configure_model(
     output_format: hpf.FormatType = hpf.FormatType.FLOAT32,
 ) -> HailoModel:
     """Load a HEF and configure it on the given VDevice."""
+    LOG.info("Loading HEF: %s", hef_path)
     hef = hpf.HEF(hef_path)
+    try:
+        LOG.info(
+            "  HEF inputs: %s",
+            [
+                (i.name, i.shape, i.format.type, i.format.order)
+                for i in hef.get_input_vstream_infos()
+            ],
+        )
+        LOG.info(
+            "  HEF outputs: %s",
+            [
+                (o.name, o.shape, o.format.type, o.format.order)
+                for o in hef.get_output_vstream_infos()
+            ],
+        )
+    except Exception:
+        LOG.exception("  Could not inspect HEF metadata: %s", hef_path)
 
     if input_format is None:
         input_format = _guess_input_format(hef)
@@ -58,7 +76,17 @@ def configure_model(
     cfg = hpf.ConfigureParams.create_from_hef(
         hef, interface=hpf.HailoStreamInterface.PCIe
     )
-    ng = vdevice.configure(hef, cfg)[0]
+    LOG.info(
+        "  Configuring network group: %s (interface=PCIe, input=%s, output=%s)",
+        hef_path,
+        input_format,
+        output_format,
+    )
+    try:
+        ng = vdevice.configure(hef, cfg)[0]
+    except Exception as exc:
+        LOG.exception("  Hailo configuration failed for %s", hef_path)
+        raise RuntimeError(f"Hailo configuration failed for {hef_path}: {exc}") from exc
 
     in_params = hpf.InputVStreamParams.make_from_network_group(
         ng, format_type=input_format

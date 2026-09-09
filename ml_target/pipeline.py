@@ -57,7 +57,14 @@ class Pipeline:
         self.clip_backend = os.environ.get("CLIP_BACKEND", CLIP_BACKEND).lower()
         if self.clip_backend not in ("tinyclip", "siglip2"):
             raise ValueError("CLIP_BACKEND must be 'tinyclip' or 'siglip2'")
+        LOG.info("Pipeline startup: CLIP_BACKEND=%s", self.clip_backend)
+        try:
+            LOG.info("HailoRT version: %s", getattr(hpf, "__version__", "unknown"))
+            LOG.info("Hailo devices: %s", hpf.Device.scan())
+        except Exception:
+            LOG.exception("Unable to query Hailo devices before model configuration")
         self.vdevice = hpf.VDevice()
+        LOG.info("Created Hailo VDevice")
 
         # Face detection
         self.det = configure_model(
@@ -66,6 +73,7 @@ class Pipeline:
             input_format=hpf.FormatType.UINT8,
             output_format=hpf.FormatType.FLOAT32,
         )
+        LOG.info("Startup progress: face detector configured")
 
         # Face recognition
         self.rec = configure_model(
@@ -74,6 +82,7 @@ class Pipeline:
             input_format=hpf.FormatType.UINT8,
             output_format=hpf.FormatType.FLOAT32,
         )
+        LOG.info("Startup progress: face recognizer configured")
 
         # CLIP image encoder
         image_cfg = (
@@ -85,6 +94,7 @@ class Pipeline:
             input_format=hpf.FormatType.UINT8,
             output_format=hpf.FormatType.FLOAT32,
         )
+        LOG.info("Startup progress: CLIP image encoder configured")
 
         # CLIP text encoder
         text_cfg = cfg.siglip2_text if self.clip_backend == "siglip2" else cfg.clip_text
@@ -94,6 +104,7 @@ class Pipeline:
             input_format=hpf.FormatType.UINT16,
             output_format=hpf.FormatType.FLOAT32,
         )
+        LOG.info("Startup progress: CLIP text encoder configured")
 
         if self.clip_backend == "siglip2":
             w = np.load(cfg.hef_path(text_cfg.weights_npz))
