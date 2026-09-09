@@ -32,10 +32,10 @@ class HailoModel:
 
     name: str
     hef_path: str
-    ng: Any  # hailo_platform NetworkGroup
-    in_params: Dict[str, Any]
-    out_params: Dict[str, Any]
+    infer_model: Any
+    configured: Any
     in_key: str
+    output_shapes: Dict[str, tuple[int, ...]]
     input_format: hpf.FormatType
     output_format: hpf.FormatType
     input_qp_scale: Optional[float] = None
@@ -73,48 +73,44 @@ def configure_model(
     if input_format is None:
         input_format = _guess_input_format(hef)
 
-    cfg = hpf.ConfigureParams.create_from_hef(
-        hef, interface=hpf.HailoStreamInterface.PCIe
-    )
     LOG.info(
-        "  Configuring network group: %s (interface=PCIe, input=%s, output=%s)",
+        "  Creating InferModel: %s (input=%s, output=%s)",
         hef_path,
         input_format,
         output_format,
     )
     try:
-        ng = vdevice.configure(hef, cfg)[0]
+        infer_model = vdevice.create_infer_model(hef_path)
+        for stream in infer_model.inputs:
+            stream.set_format_type(input_format)
+        for stream in infer_model.outputs:
+            stream.set_format_type(output_format)
+        configured = infer_model.configure()
     except Exception as exc:
         LOG.exception("  Hailo configuration failed for %s", hef_path)
         raise RuntimeError(f"Hailo configuration failed for {hef_path}: {exc}") from exc
 
-    in_params = hpf.InputVStreamParams.make_from_network_group(
-        ng, format_type=input_format
-    )
-    out_params = hpf.OutputVStreamParams.make_from_network_group(
-        ng, format_type=output_format
-    )
-
-    if not isinstance(in_params, dict) or len(in_params) != 1:
+    if len(infer_model.inputs) != 1:
         raise RuntimeError(
-            f"Expected exactly 1 input vstream, got: {list(in_params.keys())}"
+            f"Expected exactly 1 input stream, got {len(infer_model.inputs)}"
         )
 
-    in_key = next(iter(in_params.keys()))
+    in_key = infer_model.inputs[0].name
+    output_shapes = {stream.name: tuple(stream.shape) for stream in infer_model.outputs}
     name = in_key.split("/")[0] if "/" in in_key else in_key
     input_qp_scale, input_qp_zp = _get_input_quantization(hef)
 
     LOG.info("Configured model: %s", hef_path)
-    LOG.info("  in_key=%s  out_keys=%s", in_key, list(out_params.keys()))
+    LOG.info("  in_key=%s  out_keys=%s", in_key, list(output_shapes))
     LOG.info("  in_format=%s  out_format=%s", input_format, output_format)
 
     return HailoModel(
         name=name,
         hef_path=hef_path,
-        ng=ng,
-        in_params=in_params,
-        out_params=out_params,
+        infer_model=infer_model,
+        configured=configured,
         in_key=in_key,
+        output_shapes=output_shapes,
         input_format=input_format,
         output_format=output_format,
         input_qp_scale=input_qp_scale,
@@ -174,14 +170,20 @@ def activate_model(model: HailoModel) -> Generator:
     Yields a function: infer(xb) -> Dict[str, np.ndarray].
     All inferences within the context share a single activation cycle.
     """
-    with model.ng.activate(model.ng.create_params()):
-        with hpf.InferVStreams(model.ng, model.in_params, model.out_params) as pipe:
 
-            def _infer(xb: np.ndarray) -> Dict[str, np.ndarray]:
-                xb = validate_input(xb)
-                return pipe.infer({model.in_key: xb})
+    def _infer(xb: np.ndarray) -> Dict[str, np.ndarray]:
+        xb = validate_input(xb)
+        bindings = model.configured.create_bindings()
+        bindings.input().set_buffer(xb)
+        output_buffers: Dict[str, np.ndarray] = {}
+        for name, shape in model.output_shapes.items():
+            output = np.empty((xb.shape[0], *shape), dtype=np.float32)
+            bindings.output(name).set_buffer(output)
+            output_buffers[name] = output
+        model.configured.run(bindings)
+        return output_buffers
 
-            yield _infer
+    yield _infer
 
 
 def infer_single(model: HailoModel, xb: np.ndarray) -> Dict[str, np.ndarray]:
