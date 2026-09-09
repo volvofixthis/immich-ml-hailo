@@ -11,9 +11,6 @@ from safetensors import safe_open
 
 
 BASE = "https://huggingface.co/google/siglip2-base-patch32-256/resolve/main"
-IMMICH_BASE = (
-    "https://huggingface.co/immich-app/ViT-B-32-SigLIP2-256__webli/resolve/main/textual"
-)
 
 
 def download(url: str, path: str) -> None:
@@ -42,7 +39,10 @@ def main() -> None:
     tokenizer_path = os.path.join(args.models_dir, "siglip2_tokenizer.json")
     weights_path = os.path.join(args.models_dir, "siglip2_text_weights.npz")
     source_path = os.path.join(args.models_dir, "siglip2-base-patch32-256.safetensors")
-    download(f"{IMMICH_BASE}/tokenizer.json", tokenizer_path)
+    # The Hailo HEF is compiled from google/siglip2-base-patch32-256.
+    # Its tokenizer must come from the same checkpoint, not the Immich
+    # OpenCLIP/WebLI export.
+    download(f"{BASE}/tokenizer.json", tokenizer_path)
     download(f"{BASE}/model.safetensors", source_path)
 
     with safe_open(source_path, framework="numpy") as source:
