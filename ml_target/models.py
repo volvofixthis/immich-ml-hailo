@@ -181,7 +181,7 @@ def activate_model(model: HailoModel) -> Generator:
             output = np.empty((xb.shape[0], *shape), dtype=np.float32)
             bindings.output(name).set_buffer(output)
             output_buffers[name] = output
-        model.configured.run(bindings, timeout=timedelta(seconds=30))
+        model.configured.run([bindings], timeout=timedelta(seconds=30))
         return output_buffers
 
     yield _infer
