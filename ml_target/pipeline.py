@@ -312,27 +312,28 @@ def _run_facial_recognition(
     if dets:
         crop_size = cfg.arcface.crop_size
 
-        # Crop all faces
+        # Align each face to ArcFace's canonical five-point template.
         with _Timer("crop_faces"):
-            patches = [
-                crop_and_resize_rgb(image_rgb, tuple(d["box"]), out_size=crop_size)
-                for d in dets
-            ]
+            patches = [align_face_rgb(image_rgb, d, out_size=crop_size) for d in dets]
 
-        # Batch recognition in a single activation
+        # This ArcFace HEF has batch size 1, so infer one face at a time.
         with _Timer("rec_infer_batch"):
-            with activate_model(_PIPE.rec) as rec_infer:
+            embeddings = []
+            for patch in patches:
                 if _PIPE.rec.input_format == hpf.FormatType.UINT8:
-                    batch = np.stack(patches, axis=0).astype(np.uint8)
+                    batch = patch[None, ...].astype(np.uint8)
                 else:
-                    batch = np.stack(
-                        [((p.astype(np.float32) / 255.0) - 0.5) / 0.5 for p in patches],
-                        axis=0,
-                    ).astype(np.float32)
-                batch = np.ascontiguousarray(batch)
-                rec_out = rec_infer(batch)
+                    batch = (((patch.astype(np.float32) / 255.0) - 0.5) / 0.5)[
+                        None, ...
+                    ]
+                rec_out = infer_single(_PIPE.rec, np.ascontiguousarray(batch))
+                embeddings.append(
+                    np.asarray(
+                        pick_output(rec_out, hint="fc1"), dtype=np.float32
+                    ).reshape(-1)
+                )
 
-        emb_all = np.asarray(pick_output(rec_out, hint="fc1"), dtype=np.float32)
+        emb_all = np.stack(embeddings, axis=0)
 
         for i, d in enumerate(dets):
             x1, y1, x2, y2 = d["box"]
