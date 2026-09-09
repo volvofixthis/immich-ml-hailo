@@ -94,6 +94,33 @@ def crop_and_resize_rgb(
     return resize_rgb(crop, out_size, out_size)
 
 
+def align_face_rgb(
+    img_rgb: np.ndarray, detection: dict, out_size: int = 112
+) -> np.ndarray:
+    """Warp five SCRFD landmarks to ArcFace's canonical 112px template."""
+    import cv2
+
+    landmarks = np.asarray(detection.get("landmarks", []), dtype=np.float32)
+    if landmarks.shape != (5, 2):
+        return crop_and_resize_rgb(img_rgb, tuple(detection["box"]), out_size)
+    template = np.array(
+        [
+            [38.2946, 51.6963],
+            [73.5318, 51.5014],
+            [56.0252, 71.7366],
+            [41.5493, 92.3655],
+            [70.7299, 92.2041],
+        ],
+        dtype=np.float32,
+    )
+    if out_size != 112:
+        template *= out_size / 112.0
+    matrix, _ = cv2.estimateAffinePartial2D(landmarks, template, method=cv2.LMEDS)
+    if matrix is None:
+        return crop_and_resize_rgb(img_rgb, tuple(detection["box"]), out_size)
+    return cv2.warpAffine(img_rgb, matrix, (out_size, out_size), borderValue=(0, 0, 0))
+
+
 def prep_clip_image(img_rgb_u8: np.ndarray, crop_size: int, input_format) -> np.ndarray:
     """Preprocess an image for CLIP visual encoder."""
     import hailo_platform as hpf

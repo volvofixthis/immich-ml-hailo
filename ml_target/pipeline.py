@@ -19,6 +19,7 @@ from ml_target.models import (
     pick_output,
 )
 from ml_target.preprocessing import (
+    align_face_rgb,
     center_crop_square,
     crop_and_resize_rgb,
     l2_normalize,

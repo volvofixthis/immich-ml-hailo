@@ -53,22 +53,33 @@ def decode_scrfd(
     """
     LOG.info(
         "SCRFD decode: score_thr=%.3f iou_thr=%.3f scale=%.6f pad=(%d,%d) orig=(%d,%d)",
-        score_thr, iou_thr, scale, pad_x, pad_y, orig_w, orig_h,
+        score_thr,
+        iou_thr,
+        scale,
+        pad_x,
+        pad_y,
+        orig_w,
+        orig_h,
     )
 
-    feats: List[Tuple[int, np.ndarray, np.ndarray]] = []
-    for stride, cls_name, box_name in scrfd_cfg.output_layers:
-        if cls_name in outputs and box_name in outputs:
-            feats.append((stride, outputs[cls_name], outputs[box_name]))
+    feats: List[Tuple[int, np.ndarray, np.ndarray, np.ndarray]] = []
+    for stride, cls_name, box_name, landmark_name in scrfd_cfg.output_layers:
+        if cls_name in outputs and box_name in outputs and landmark_name in outputs:
+            feats.append(
+                (stride, outputs[cls_name], outputs[box_name], outputs[landmark_name])
+            )
 
     if not feats:
-        LOG.warning("SCRFD decode: no matching output layers found in %s", list(outputs.keys()))
+        LOG.warning(
+            "SCRFD decode: no matching output layers found in %s", list(outputs.keys())
+        )
         return []
 
     all_boxes: List[np.ndarray] = []
     all_scores: List[np.ndarray] = []
+    all_landmarks: List[np.ndarray] = []
 
-    for stride, cls_map, box_map in feats:
+    for stride, cls_map, box_map, landmark_map in feats:
         cls_map = cls_map[0].astype(np.float32, copy=False)  # (H, W, 2)
         box_map = box_map[0].astype(np.float32, copy=False)  # (H, W, 8)
         H, W = cls_map.shape[:2]
@@ -79,6 +90,9 @@ def decode_scrfd(
             raise ValueError(f"Unexpected bbox channels for SCRFD: {box_map.shape}")
 
         box_map_f = box_map.reshape(H, W, 2, 4)  # 2 anchors
+        landmark_map_f = (
+            landmark_map[0].astype(np.float32, copy=False).reshape(H, W, 2, 10)
+        )
 
         ys = (np.arange(H, dtype=np.float32) + 0.5) * float(stride)
         xs = (np.arange(W, dtype=np.float32) + 0.5) * float(stride)
@@ -98,6 +112,9 @@ def decode_scrfd(
         y2 = centers_a[..., 1] + b
 
         boxes = np.stack([x1, y1, x2, y2], axis=-1).reshape(-1, 4)
+        landmark_x = landmark_map_f[..., 0::2] * s + centers_a[..., 0:1]
+        landmark_y = landmark_map_f[..., 1::2] * s + centers_a[..., 1:2]
+        landmarks = np.stack([landmark_x, landmark_y], axis=-1).reshape(-1, 5, 2)
         scores = np.repeat(fg_score.reshape(-1), 2)
 
         keep_mask = scores >= score_thr
@@ -106,6 +123,7 @@ def decode_scrfd(
 
         all_boxes.append(boxes[keep_mask])
         all_scores.append(scores[keep_mask])
+        all_landmarks.append(landmarks[keep_mask])
 
     if not all_boxes:
         LOG.info("SCRFD decode: no boxes passed score_thr=%.3f", score_thr)
@@ -113,10 +131,14 @@ def decode_scrfd(
 
     boxes_lb = np.concatenate(all_boxes, axis=0)
     scores = np.concatenate(all_scores, axis=0)
+    landmarks_lb = np.concatenate(all_landmarks, axis=0)
 
     boxes_lb[:, [0, 2]] -= float(pad_x)
     boxes_lb[:, [1, 3]] -= float(pad_y)
     boxes_orig = boxes_lb / float(scale)
+    landmarks_orig = landmarks_lb.copy()
+    landmarks_orig[..., 0] = (landmarks_orig[..., 0] - float(pad_x)) / float(scale)
+    landmarks_orig[..., 1] = (landmarks_orig[..., 1] - float(pad_y)) / float(scale)
 
     boxes_orig[:, 0] = np.clip(boxes_orig[:, 0], 0, orig_w - 1)
     boxes_orig[:, 1] = np.clip(boxes_orig[:, 1], 0, orig_h - 1)
@@ -127,7 +149,13 @@ def decode_scrfd(
     dets: List[Dict[str, Any]] = []
     for i in keep_idx:
         x1, y1, x2, y2 = boxes_orig[i].tolist()
-        dets.append({"box": [x1, y1, x2, y2], "score": float(scores[i])})
+        dets.append(
+            {
+                "box": [x1, y1, x2, y2],
+                "landmarks": landmarks_orig[i].tolist(),
+                "score": float(scores[i]),
+            }
+        )
 
     LOG.info("SCRFD decode: after NMS keep=%d", len(dets))
     return dets

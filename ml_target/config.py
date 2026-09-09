@@ -30,11 +30,11 @@ class ScrfdConfig:
     hef: str = "scrfd_2.5g.hef"
     input_size: int = 640
     # (stride, cls_layer_name, box_layer_name) — must match the compiled HEF
-    output_layers: List[Tuple[int, str, str]] = field(
+    output_layers: List[Tuple[int, str, str, str]] = field(
         default_factory=lambda: [
-            (8, "scrfd_2_5g/conv42", "scrfd_2_5g/conv43"),
-            (16, "scrfd_2_5g/conv49", "scrfd_2_5g/conv50"),
-            (32, "scrfd_2_5g/conv55", "scrfd_2_5g/conv56"),
+            (8, "scrfd_2_5g/conv42", "scrfd_2_5g/conv43", "scrfd_2_5g/conv44"),
+            (16, "scrfd_2_5g/conv49", "scrfd_2_5g/conv50", "scrfd_2_5g/conv51"),
+            (32, "scrfd_2_5g/conv55", "scrfd_2_5g/conv56", "scrfd_2_5g/conv57"),
         ]
     )
 
