@@ -131,3 +131,24 @@ class SimpleTokenizer:
         else:
             tokens = tokens + [0] * (context_length - len(tokens))
         return np.array(tokens, dtype=np.int32)
+
+
+class Siglip2Tokenizer:
+    """Tokenizer for the 256k-vocabulary SigLIP2 text encoder."""
+
+    def __init__(self, tokenizer_path: str):
+        try:
+            from tokenizers import Tokenizer
+        except ImportError as exc:
+            raise RuntimeError("SigLIP2 requires the 'tokenizers' package") from exc
+
+        self.tokenizer = Tokenizer.from_file(tokenizer_path)
+
+    def tokenize(self, text: str, context_length: int = 64) -> np.ndarray:
+        encoding = self.tokenizer.encode(text.strip(), add_special_tokens=True)
+        ids = encoding.ids[:context_length]
+        if len(encoding.ids) > context_length:
+            ids[-1] = 1  # SigLIP2's <eos> token
+        if len(ids) < context_length:
+            ids.extend([0] * (context_length - len(ids)))
+        return np.asarray(ids, dtype=np.int32)

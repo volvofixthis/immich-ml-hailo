@@ -67,7 +67,7 @@ fi
 if ! curl -sf "$BASE_URL/ping" >/dev/null 2>&1; then
     echo "$(red ERROR): Service not reachable at $BASE_URL/ping"
     echo "Start the container first:"
-    echo "  docker run -itd --device=/dev/hailo0:/dev/hailo0 --group-add=0 -p 3003:3003 immich-ml-hailo:v4.23.0"
+    echo "  docker run -itd --device=/dev/hailo0:/dev/hailo0 --group-add=0 -p 3003:3003 -e CLIP_BACKEND=siglip2 immich-ml-hailo:v5.3.0"
     exit 1
 fi
 
@@ -102,9 +102,9 @@ check "response has clip key" "$R" "
 assert 'clip' in r, f'missing clip key: {list(r.keys())}'
 "
 
-check "clip is 512-dim embedding" "$R" "
+check "clip is 768-dim embedding" "$R" "
 emb = json.loads(r['clip'])
-assert isinstance(emb, list) and len(emb) == 512, f'expected 512-dim, got {len(emb)}'
+assert isinstance(emb, list) and len(emb) == 768, f'expected 768-dim, got {len(emb)}'
 "
 
 check "imageHeight and imageWidth present" "$R" "
@@ -125,9 +125,9 @@ check "response has clip key" "$R" "
 assert 'clip' in r, f'missing clip key: {list(r.keys())}'
 "
 
-check "clip is 512-dim embedding" "$R" "
+check "clip is 768-dim embedding" "$R" "
 emb = json.loads(r['clip'])
-assert isinstance(emb, list) and len(emb) == 512, f'expected 512-dim, got {len(emb)}'
+assert isinstance(emb, list) and len(emb) == 768, f'expected 768-dim, got {len(emb)}'
 "
 
 check "no imageHeight/imageWidth for text-only" "$R" "
@@ -266,7 +266,7 @@ assert 'clip' in r, f'missing clip: {list(r.keys())}'
 
 check "clip embedding is valid" "$R" "
 emb = json.loads(r['clip'])
-assert len(emb) == 512
+assert len(emb) == 768
 "
 
 # ── Test 9: Error handling ────────────────────────────────────────────

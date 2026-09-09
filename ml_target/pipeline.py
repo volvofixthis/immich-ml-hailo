@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import hailo_platform as hpf
 
-from ml_target.config import OcrDetectionConfig, PipelineConfig
+from ml_target.config import CLIP_BACKEND, OcrDetectionConfig, PipelineConfig
 from ml_target.decoders import decode_scrfd
 from ml_target.models import (
     HailoModel,
@@ -25,9 +25,11 @@ from ml_target.preprocessing import (
     letterbox_rgb,
     prep_clip_image,
     prep_clip_text_input,
+    prep_siglip2_image,
+    prep_siglip2_text_input,
 )
 from ml_target.ocr import CTCDecoder, crop_text_region, decode_db_detection
-from ml_target.tokenizer import SimpleTokenizer
+from ml_target.tokenizer import Siglip2Tokenizer, SimpleTokenizer
 
 LOG = logging.getLogger("ml_target.pipeline")
 
@@ -52,6 +54,9 @@ class _Timer:
 class Pipeline:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
+        self.clip_backend = os.environ.get("CLIP_BACKEND", CLIP_BACKEND).lower()
+        if self.clip_backend not in ("tinyclip", "siglip2"):
+            raise ValueError("CLIP_BACKEND must be 'tinyclip' or 'siglip2'")
         self.vdevice = hpf.VDevice()
 
         # Face detection
@@ -71,35 +76,52 @@ class Pipeline:
         )
 
         # CLIP image encoder
+        image_cfg = (
+            cfg.siglip2_image if self.clip_backend == "siglip2" else cfg.clip_image
+        )
         self.clip_img = configure_model(
             self.vdevice,
-            cfg.hef_path(cfg.clip_image.hef),
+            cfg.hef_path(image_cfg.hef),
             input_format=hpf.FormatType.UINT8,
             output_format=hpf.FormatType.FLOAT32,
         )
 
         # CLIP text encoder
+        text_cfg = cfg.siglip2_text if self.clip_backend == "siglip2" else cfg.clip_text
         self.clip_txt = configure_model(
             self.vdevice,
-            cfg.hef_path(cfg.clip_text.hef),
+            cfg.hef_path(text_cfg.hef),
             input_format=hpf.FormatType.UINT16,
             output_format=hpf.FormatType.FLOAT32,
         )
 
-        # CLIP text weights
-        w = np.load(cfg.hef_path(cfg.clip_text.weights_npz))
-        self.token_embedding = np.asarray(w["token_embedding"], dtype=np.float32)
-        self.positional_embedding = np.asarray(w["positional_embedding"], dtype=np.float32)
-        self.text_projection = np.asarray(w["text_projection"], dtype=np.float32)
-        self.eot_token_id = int(np.asarray(w["eot_token_id"]).reshape(()))
-
-        self.tokenizer = SimpleTokenizer(cfg.hef_path(cfg.clip_text.bpe_gz))
-
-        LOG.info("CLIP text assets loaded:")
-        LOG.info("  token_embedding=%s", self.token_embedding.shape)
-        LOG.info("  positional_embedding=%s", self.positional_embedding.shape)
-        LOG.info("  text_projection=%s", self.text_projection.shape)
-        LOG.info("  eot_token_id=%d", self.eot_token_id)
+        if self.clip_backend == "siglip2":
+            w = np.load(cfg.hef_path(text_cfg.weights_npz))
+            self.token_embedding = np.asarray(w["token_embedding"], dtype=np.float32)
+            self.positional_embedding = np.asarray(
+                w["positional_embedding"], dtype=np.float32
+            )
+            self.tokenizer = Siglip2Tokenizer(cfg.hef_path(text_cfg.tokenizer_json))
+            LOG.info(
+                "SigLIP2 text assets loaded: token_embedding=%s positional_embedding=%s",
+                self.token_embedding.shape,
+                self.positional_embedding.shape,
+            )
+        else:
+            w = np.load(cfg.hef_path(text_cfg.weights_npz))
+            self.token_embedding = np.asarray(w["token_embedding"], dtype=np.float32)
+            self.positional_embedding = np.asarray(
+                w["positional_embedding"], dtype=np.float32
+            )
+            self.text_projection = np.asarray(w["text_projection"], dtype=np.float32)
+            self.eot_token_id = int(np.asarray(w["eot_token_id"]).reshape(()))
+            self.tokenizer = SimpleTokenizer(cfg.hef_path(text_cfg.bpe_gz))
+            LOG.info(
+                "TinyCLIP text assets loaded: token_embedding=%s positional_embedding=%s text_projection=%s",
+                self.token_embedding.shape,
+                self.positional_embedding.shape,
+                self.text_projection.shape,
+            )
 
         # OCR models (optional — loaded only if HEFs and char dict exist)
         self.ocr_det: Optional[HailoModel] = None
@@ -108,9 +130,11 @@ class Pipeline:
         ocr_det_path = cfg.hef_path(cfg.ocr_detection.hef)
         ocr_rec_path = cfg.hef_path(cfg.ocr_recognition.hef)
         char_dict_path = cfg.hef_path(cfg.ocr_recognition.char_dict)
-        if (os.path.exists(ocr_det_path)
-                and os.path.exists(ocr_rec_path)
-                and os.path.exists(char_dict_path)):
+        if (
+            os.path.exists(ocr_det_path)
+            and os.path.exists(ocr_rec_path)
+            and os.path.exists(char_dict_path)
+        ):
             self.ocr_det = configure_model(
                 self.vdevice,
                 ocr_det_path,
@@ -127,11 +151,18 @@ class Pipeline:
                 char_dict_path,
                 blank_index=cfg.ocr_recognition.blank_index,
             )
-            LOG.info("OCR models loaded: det=%s rec=%s dict=%s",
-                     ocr_det_path, ocr_rec_path, char_dict_path)
+            LOG.info(
+                "OCR models loaded: det=%s rec=%s dict=%s",
+                ocr_det_path,
+                ocr_rec_path,
+                char_dict_path,
+            )
         else:
-            missing = [p for p in [ocr_det_path, ocr_rec_path, char_dict_path]
-                       if not os.path.exists(p)]
+            missing = [
+                p
+                for p in [ocr_det_path, ocr_rec_path, char_dict_path]
+                if not os.path.exists(p)
+            ]
             LOG.info("OCR disabled, missing files: %s", missing)
 
 
@@ -170,26 +201,44 @@ def run_inference(
         H0, W0 = 0, 0
 
     for task_name, task_cfg in entries.items():
-
         # ── FACE DETECTION + RECOGNITION ──────────────────────────
         if task_name == "facial-recognition":
-            resp.update(_run_facial_recognition(
-                task_cfg, image_rgb, H0, W0, cfg,
-            ))
+            resp.update(
+                _run_facial_recognition(
+                    task_cfg,
+                    image_rgb,
+                    H0,
+                    W0,
+                    cfg,
+                )
+            )
             continue
 
         # ── CLIP (Smart Search) ───────────────────────────────────
         if task_name == "clip":
-            resp.update(_run_clip(
-                task_cfg, image_rgb, text, H0, W0, cfg,
-            ))
+            resp.update(
+                _run_clip(
+                    task_cfg,
+                    image_rgb,
+                    text,
+                    H0,
+                    W0,
+                    cfg,
+                )
+            )
             continue
 
         # ── OCR ───────────────────────────────────────────────────
         if task_name == "ocr":
-            resp.update(_run_ocr(
-                task_cfg, image_rgb, H0, W0, cfg,
-            ))
+            resp.update(
+                _run_ocr(
+                    task_cfg,
+                    image_rgb,
+                    H0,
+                    W0,
+                    cfg,
+                )
+            )
             continue
 
         # ── Unknown task ──────────────────────────────────────────
@@ -200,20 +249,28 @@ def run_inference(
 
 # ── Task implementations ─────────────────────────────────────────────
 
+
 def _run_facial_recognition(
     task_cfg: Any,
     image_rgb: Optional[np.ndarray],
-    H0: int, W0: int,
+    H0: int,
+    W0: int,
     cfg: PipelineConfig,
 ) -> Dict[str, Any]:
     if image_rgb is None:
         return {"facial-recognition": {"error": "missing image"}}
 
-    det_opts = task_cfg.get("detection", {}).get("options", {}) if isinstance(task_cfg, dict) else {}
+    det_opts = (
+        task_cfg.get("detection", {}).get("options", {})
+        if isinstance(task_cfg, dict)
+        else {}
+    )
     min_score = float(det_opts.get("minScore", 0.7))
     iou_thr = float(det_opts.get("iouThreshold", 0.4))
 
-    LOG.info("FACEREC: H=%d W=%d min_score=%.3f iou_thr=%.3f", H0, W0, min_score, iou_thr)
+    LOG.info(
+        "FACEREC: H=%d W=%d min_score=%.3f iou_thr=%.3f", H0, W0, min_score, iou_thr
+    )
 
     # Detection
     input_size = cfg.scrfd.input_size
@@ -256,9 +313,10 @@ def _run_facial_recognition(
                 if _PIPE.rec.input_format == hpf.FormatType.UINT8:
                     batch = np.stack(patches, axis=0).astype(np.uint8)
                 else:
-                    batch = np.stack([
-                        ((p.astype(np.float32) / 255.0) - 0.5) / 0.5 for p in patches
-                    ], axis=0).astype(np.float32)
+                    batch = np.stack(
+                        [((p.astype(np.float32) / 255.0) - 0.5) / 0.5 for p in patches],
+                        axis=0,
+                    ).astype(np.float32)
                 batch = np.ascontiguousarray(batch)
                 rec_out = rec_infer(batch)
 
@@ -269,16 +327,18 @@ def _run_facial_recognition(
             emb = l2_normalize(emb_all[i])
             emb_str = json.dumps(emb.tolist(), separators=(",", ":"))
 
-            faces.append({
-                "boundingBox": {
-                    "x1": int(round(x1)),
-                    "y1": int(round(y1)),
-                    "x2": int(round(x2)),
-                    "y2": int(round(y2)),
-                },
-                "score": float(d["score"]),
-                "embedding": emb_str,
-            })
+            faces.append(
+                {
+                    "boundingBox": {
+                        "x1": int(round(x1)),
+                        "y1": int(round(y1)),
+                        "x2": int(round(x2)),
+                        "y2": int(round(y2)),
+                    },
+                    "score": float(d["score"]),
+                    "embedding": emb_str,
+                }
+            )
 
     return {
         "facial-recognition": faces,
@@ -291,7 +351,8 @@ def _run_clip(
     task_cfg: Any,
     image_rgb: Optional[np.ndarray],
     text: Optional[str],
-    H0: int, W0: int,
+    H0: int,
+    W0: int,
     cfg: PipelineConfig,
 ) -> Dict[str, Any]:
     clip_cfg = task_cfg if isinstance(task_cfg, dict) else {}
@@ -304,11 +365,38 @@ def _run_clip(
 
         LOG.info("CLIP TEXT: len=%d", len(text))
 
-        tc = cfg.clip_text
-        token_ids = _PIPE.tokenizer.tokenize(text, context_length=tc.context_length).astype(np.int32, copy=False)
+        tc = cfg.siglip2_text if _PIPE.clip_backend == "siglip2" else cfg.clip_text
+        token_ids = _PIPE.tokenizer.tokenize(
+            text, context_length=tc.context_length
+        ).astype(np.int32, copy=False)
+
+        if _PIPE.clip_backend == "siglip2":
+            xb = prep_siglip2_text_input(
+                token_ids,
+                _PIPE.token_embedding,
+                _PIPE.positional_embedding,
+                qp_scale=_PIPE.clip_txt.input_qp_scale
+                or tc.qp_scale
+                or _missing_quant("SIGLIP2_TEXT_QP_SCALE"),
+                qp_zp=_PIPE.clip_txt.input_qp_zp
+                if _PIPE.clip_txt.input_qp_zp is not None
+                else tc.qp_zp
+                if tc.qp_zp is not None
+                else _missing_quant("SIGLIP2_TEXT_QP_ZP"),
+            )
+            with _Timer("clip_text_infer"):
+                out = infer_single(_PIPE.clip_txt, xb)
+            y = np.asarray(pick_output(out), dtype=np.float32).reshape(-1)
+            if y.shape != (tc.embed_dim,):
+                raise ValueError(
+                    f"Unexpected SigLIP2 text encoder output shape: {y.shape}"
+                )
+            return {"clip": json.dumps(l2_normalize(y).tolist(), separators=(",", ":"))}
 
         eot_positions = np.where(token_ids == _PIPE.eot_token_id)[0]
-        eot_pos = int(eot_positions[0]) if eot_positions.size > 0 else tc.context_length - 1
+        eot_pos = (
+            int(eot_positions[0]) if eot_positions.size > 0 else tc.context_length - 1
+        )
 
         xb = prep_clip_text_input(
             token_ids,
@@ -337,7 +425,12 @@ def _run_clip(
 
     LOG.info("CLIP IMAGE: H=%d W=%d", H0, W0)
 
-    xb = prep_clip_image(image_rgb, cfg.clip_image.crop_size, _PIPE.clip_img.input_format)
+    if _PIPE.clip_backend == "siglip2":
+        xb = prep_siglip2_image(image_rgb, cfg.siglip2_image.input_size)
+    else:
+        xb = prep_clip_image(
+            image_rgb, cfg.clip_image.crop_size, _PIPE.clip_img.input_format
+        )
 
     with _Timer("clip_image_infer"):
         clip_out = infer_single(_PIPE.clip_img, xb)
@@ -351,10 +444,17 @@ def _run_clip(
     }
 
 
+def _missing_quant(name: str) -> float:
+    raise RuntimeError(
+        f"SigLIP2 text quantization metadata is unavailable; set {name} from hef_inspect"
+    )
+
+
 def _run_ocr(
     task_cfg: Any,
     image_rgb: Optional[np.ndarray],
-    H0: int, W0: int,
+    H0: int,
+    W0: int,
     cfg: PipelineConfig,
 ) -> Dict[str, Any]:
     """OCR pipeline: DBNet text detection -> CTC text recognition.
@@ -362,17 +462,35 @@ def _run_ocr(
     Uses PaddleOCR v5 mobile models on Hailo-8.
     """
     if _PIPE.ocr_det is None or _PIPE.ocr_rec is None or _PIPE.ctc_decoder is None:
-        return {"ocr": {"error": "OCR models not available. Add PaddleOCR v5 HEF files and ppocrv5_dict.txt to models directory."}}
+        return {
+            "ocr": {
+                "error": "OCR models not available. Add PaddleOCR v5 HEF files and ppocrv5_dict.txt to models directory."
+            }
+        }
 
     if image_rgb is None:
         return {"ocr": {"error": "missing image"}}
 
-    det_opts = task_cfg.get("detection", {}).get("options", {}) if isinstance(task_cfg, dict) else {}
-    rec_opts = task_cfg.get("recognition", {}).get("options", {}) if isinstance(task_cfg, dict) else {}
+    det_opts = (
+        task_cfg.get("detection", {}).get("options", {})
+        if isinstance(task_cfg, dict)
+        else {}
+    )
+    rec_opts = (
+        task_cfg.get("recognition", {}).get("options", {})
+        if isinstance(task_cfg, dict)
+        else {}
+    )
     min_det_score = float(det_opts.get("minScore", cfg.ocr_detection.box_thresh))
     min_rec_score = float(rec_opts.get("minScore", 0.9))
 
-    LOG.info("OCR: H=%d W=%d min_det_score=%.3f min_rec_score=%.3f", H0, W0, min_det_score, min_rec_score)
+    LOG.info(
+        "OCR: H=%d W=%d min_det_score=%.3f min_rec_score=%.3f",
+        H0,
+        W0,
+        min_det_score,
+        min_rec_score,
+    )
 
     det_cfg = cfg.ocr_detection
     rec_cfg = cfg.ocr_recognition
@@ -380,7 +498,10 @@ def _run_ocr(
     # ── Step 1: Detection — letterbox to model input size ──
     with _Timer("ocr_letterbox"):
         det_input, scale, pad_x, pad_y = letterbox_rgb(
-            image_rgb, det_cfg.input_w, det_cfg.input_h, pad_value=0,
+            image_rgb,
+            det_cfg.input_w,
+            det_cfg.input_h,
+            pad_value=0,
         )
     xb = np.ascontiguousarray(det_input[None, ...], dtype=np.uint8)
 
@@ -391,8 +512,11 @@ def _run_ocr(
     prob_map = np.asarray(pick_output(det_out), dtype=np.float32).squeeze()
     if prob_map.ndim != 2:
         LOG.warning("OCR det output unexpected shape: %s", prob_map.shape)
-        return {"ocr": {"text": [], "box": [], "boxScore": [], "textScore": []},
-                "imageHeight": int(H0), "imageWidth": int(W0)}
+        return {
+            "ocr": {"text": [], "box": [], "boxScore": [], "textScore": []},
+            "imageHeight": int(H0),
+            "imageWidth": int(W0),
+        }
 
     # Override box_thresh with request-level minScore for detection
     det_cfg_override = OcrDetectionConfig(
@@ -421,8 +545,11 @@ def _run_ocr(
     LOG.info("OCR: %d text regions detected", len(text_regions))
 
     if not text_regions:
-        return {"ocr": {"text": [], "box": [], "boxScore": [], "textScore": []},
-                "imageHeight": int(H0), "imageWidth": int(W0)}
+        return {
+            "ocr": {"text": [], "box": [], "boxScore": [], "textScore": []},
+            "imageHeight": int(H0),
+            "imageWidth": int(W0),
+        }
 
     # ── Step 2: Recognition — crop each text region and run through recognizer ──
     texts: List[str] = []
@@ -447,7 +574,9 @@ def _run_ocr(
                 # CTC decode
                 if logits.ndim == 1:
                     continue
-                decoded = _PIPE.ctc_decoder.decode(logits[None, ...] if logits.ndim == 2 else logits)
+                decoded = _PIPE.ctc_decoder.decode(
+                    logits[None, ...] if logits.ndim == 2 else logits
+                )
                 if not decoded:
                     continue
 
@@ -460,7 +589,11 @@ def _run_ocr(
                 box_scores.append(region["score"])
                 text_scores.append(confidence)
 
-    LOG.info("OCR: %d text regions recognized (of %d detected)", len(texts), len(text_regions))
+    LOG.info(
+        "OCR: %d text regions recognized (of %d detected)",
+        len(texts),
+        len(text_regions),
+    )
 
     return {
         "ocr": {

@@ -29,6 +29,7 @@ LOG = logging.getLogger("ml_target.models")
 @dataclass
 class HailoModel:
     """Wraps a configured Hailo network group with its vstream parameters."""
+
     name: str
     hef_path: str
     ng: Any  # hailo_platform NetworkGroup
@@ -37,6 +38,8 @@ class HailoModel:
     in_key: str
     input_format: hpf.FormatType
     output_format: hpf.FormatType
+    input_qp_scale: Optional[float] = None
+    input_qp_zp: Optional[float] = None
 
 
 def configure_model(
@@ -52,17 +55,26 @@ def configure_model(
     if input_format is None:
         input_format = _guess_input_format(hef)
 
-    cfg = hpf.ConfigureParams.create_from_hef(hef, interface=hpf.HailoStreamInterface.PCIe)
+    cfg = hpf.ConfigureParams.create_from_hef(
+        hef, interface=hpf.HailoStreamInterface.PCIe
+    )
     ng = vdevice.configure(hef, cfg)[0]
 
-    in_params = hpf.InputVStreamParams.make_from_network_group(ng, format_type=input_format)
-    out_params = hpf.OutputVStreamParams.make_from_network_group(ng, format_type=output_format)
+    in_params = hpf.InputVStreamParams.make_from_network_group(
+        ng, format_type=input_format
+    )
+    out_params = hpf.OutputVStreamParams.make_from_network_group(
+        ng, format_type=output_format
+    )
 
     if not isinstance(in_params, dict) or len(in_params) != 1:
-        raise RuntimeError(f"Expected exactly 1 input vstream, got: {list(in_params.keys())}")
+        raise RuntimeError(
+            f"Expected exactly 1 input vstream, got: {list(in_params.keys())}"
+        )
 
     in_key = next(iter(in_params.keys()))
     name = in_key.split("/")[0] if "/" in in_key else in_key
+    input_qp_scale, input_qp_zp = _get_input_quantization(hef)
 
     LOG.info("Configured model: %s", hef_path)
     LOG.info("  in_key=%s  out_keys=%s", in_key, list(out_params.keys()))
@@ -77,7 +89,26 @@ def configure_model(
         in_key=in_key,
         input_format=input_format,
         output_format=output_format,
+        input_qp_scale=input_qp_scale,
+        input_qp_zp=input_qp_zp,
     )
+
+
+def _get_input_quantization(hef: hpf.HEF) -> tuple[Optional[float], Optional[float]]:
+    """Read quantization metadata when exposed by the installed HailoRT version."""
+    try:
+        info = hef.get_input_vstream_infos()[0]
+        quant = getattr(info, "quant_info", None)
+        if quant is None:
+            return None, None
+        scale = getattr(quant, "qp_scale", getattr(quant, "scale", None))
+        zp = getattr(quant, "qp_zp", getattr(quant, "zero_point", None))
+        return (
+            float(scale) if scale is not None else None,
+            float(zp) if zp is not None else None,
+        )
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return None, None
 
 
 def _guess_input_format(hef: hpf.HEF) -> hpf.FormatType:
@@ -117,9 +148,11 @@ def activate_model(model: HailoModel) -> Generator:
     """
     with model.ng.activate(model.ng.create_params()):
         with hpf.InferVStreams(model.ng, model.in_params, model.out_params) as pipe:
+
             def _infer(xb: np.ndarray) -> Dict[str, np.ndarray]:
                 xb = validate_input(xb)
                 return pipe.infer({model.in_key: xb})
+
             yield _infer
 
 
@@ -130,7 +163,9 @@ def infer_single(model: HailoModel, xb: np.ndarray) -> Dict[str, np.ndarray]:
         return infer(xb)
 
 
-def pick_output(outputs: Dict[str, np.ndarray], hint: Optional[str] = None) -> np.ndarray:
+def pick_output(
+    outputs: Dict[str, np.ndarray], hint: Optional[str] = None
+) -> np.ndarray:
     """Select the main output tensor from an inference result dict.
 
     If there's only one output, return it. Otherwise use `hint` to find a matching key.

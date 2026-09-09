@@ -1,4 +1,4 @@
-FROM hailo-base:v4.23.0
+FROM hailo-base:v5.3.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
@@ -9,12 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip3 install \
     fastapi "uvicorn[standard]" python-multipart pillow requests \
-    pyclipper shapely opencv-python-headless
+    pyclipper shapely opencv-python-headless tokenizers safetensors
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    CLIP_BACKEND=siglip2
 
 COPY ml_target/ ml_target/
 COPY models/ models/

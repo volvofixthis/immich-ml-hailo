@@ -1,10 +1,10 @@
-# Immich ML Worker for Hailo-8 PCIe Accelerators
+# Immich ML Worker for Hailo PCIe Accelerators
 
-An external ML inference worker for [Immich](https://immich.app/) that offloads **face detection/recognition**, **CLIP smart search**, and **OCR** to a **Hailo-8** PCIe accelerator. It replaces Immich's built-in ONNX-based ML worker with a FastAPI service that speaks the same `/predict` protocol — but runs inference on the Hailo-8 hardware at a fraction of the power.
+An external ML inference worker for [Immich](https://immich.app/) that offloads **face detection/recognition**, **CLIP smart search**, and **OCR** to a Hailo PCIe accelerator. This setup targets **Hailo-10H with HailoRT 5.3.0** and uses SigLIP2 B/32-256 by default.
 
 ## Immich Jobs Handled by This Worker
 
-This worker accelerates the following Immich jobs on the Hailo-8:
+This worker accelerates the following Immich jobs on Hailo:
 
 | Immich Job | Hailo Model | Notes |
 |------------|-------------|-------|
@@ -20,14 +20,14 @@ Other Immich jobs (Generate Thumbnails, Extract Metadata, Transcode Videos, Side
 
 Two CLIP backends are available, selectable via the `CLIP_BACKEND` environment variable:
 
-|  | TinyCLIP (default) | SigLIP |
+|  | TinyCLIP | SigLIP2 (default) |
 |--|-------------------|--------|
-| Image input | 224x224 (center-crop) | 224x224 (squash resize) |
+| Image input | 224x224 (center-crop) | 256x256 (resize) |
 | Embedding dim | 512 | 768 |
 | Image FPS | ~60 | ~14 |
 | Text FPS | ~18 | ~17 |
 | Search quality | Good | Better |
-| Immich model match | None | `ViT-B-16-SigLIP__webli` |
+| Immich model match | None | `ViT-B-32-SigLIP2-256__webli` |
 
 **TinyCLIP** is significantly faster (~4x for images) but produces embeddings incompatible with any Immich default model.
 
@@ -37,15 +37,15 @@ Both backends output UINT16 from the Hailo device and are dequantized to float32
 
 ## Prerequisites
 
-- **Hailo-8 or Hailo-8L** M.2 PCIe accelerator
-- **Host Hailo drivers** installed and working (HailoRT v4.23.0). For Unraid, use the `Hailo RT Driver` app by ich777. See [hailort-drivers](https://github.com/hailo-ai/hailort-drivers) (v4 branch for Hailo-8/8L, v5 for Hailo-10H/15H).
+- **Hailo-10H** M.2 PCIe accelerator
+- **Host Hailo drivers** installed and working with HailoRT 5.3.0. See [hailort-drivers](https://github.com/hailo-ai/hailort-drivers).
 - **Docker** on the host
 
 ## Download HailoRT Packages (required for both Quick and Manual Setup)
 
 The HailoRT runtime packages require a free [Hailo Developer Zone](https://hailo.ai/developer-zone) account and cannot be downloaded automatically.
 
-Go to [Software Downloads](https://hailo.ai/developer-zone/software-downloads/?product=ai_accelerators&device=hailo_8_8l) and select:
+Go to [Software Downloads](https://hailo.ai/developer-zone/software-downloads/) and select HailoRT 5.3.0 for Hailo-10H:
 
 | Filter | Value |
 |--------|-------|
@@ -55,21 +55,21 @@ Go to [Software Downloads](https://hailo.ai/developer-zone/software-downloads/?p
 | OS | Linux |
 | Python Version | 3.12 |
 
-Download the two files for your platform and place them in `hailo-rt-4/`:
+Download the two files for your platform and place them in `hailo-rt-5/`:
 
 **x86_64:**
-- _HailoRT – Python package (whl) for Python 3.12, x86_64_ → `hailort-4.23.0-cp312-cp312-linux_x86_64.whl`
-- _HailoRT – Ubuntu package (deb) for amd64_ → `hailort_4.23.0_amd64.deb`
+- _HailoRT – Python package (whl) for Python 3.12, x86_64_ → `hailort-5.3.0-cp312-cp312-linux_x86_64.whl`
+- _HailoRT – Ubuntu package (deb) for amd64_ → `hailort_5.3.0_amd64.deb`
 
 **ARM64 (aarch64):**
-- _HailoRT – Python package (whl) for Python 3.12, aarch64_ → `hailort-4.23.0-cp312-cp312-linux_aarch64.whl`
-- _HailoRT – Ubuntu package (deb) for arm64_ → `hailort_4.23.0_arm64.deb`
+- _HailoRT – Python package (whl) for Python 3.12, aarch64_ → `hailort-5.3.0-cp312-cp312-linux_aarch64.whl`
+- _HailoRT – Ubuntu package (deb) for arm64_ → `hailort_5.3.0_arm64.deb`
 
-> **Why Python 3.12?** The Docker base image uses Ubuntu 24.04 LTS, which ships Python 3.12 as the system default. HailoRT 4.23.0 supports Python 3.10, 3.11, and 3.12 — using the system Python avoids managing a venv, and 3.12 has the best performance (~5% faster runtime than 3.11).
+> **Why Python 3.12?** The Docker base image uses Ubuntu 24.04 LTS, which ships Python 3.12 as the system default.
 
 ## Quick Setup
 
-Once the HailoRT packages are in `hailo-rt-4/`, run:
+Once the HailoRT packages are in `hailo-rt-5/`, run:
 
 ```bash
 ./setup.sh

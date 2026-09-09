@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HAILORT_VERSION="4.23.0"
+HAILORT_VERSION="5.3.0"
 IMAGE_BASE="hailo-base:v${HAILORT_VERSION}"
 IMAGE_APP="immich-ml-hailo:v${HAILORT_VERSION}"
 TEST_IMAGE="${1:-$SCRIPT_DIR/tests/test.jpg}"
@@ -26,7 +26,7 @@ TOTAL=6
 
 # ── Step 1: Detect platform and check HailoRT files ──────────────────
 
-step 1 "Checking HailoRT packages in hailo-rt-4/"
+step 1 "Checking HailoRT packages in hailo-rt-5/"
 
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -38,8 +38,8 @@ esac
 
 echo "  Platform: $ARCH -> deb=$DEB_ARCH whl=$WHL_ARCH"
 
-DEB_FILE="hailo-rt-4/hailort_${HAILORT_VERSION}_${DEB_ARCH}.deb"
-WHL_FILE="hailo-rt-4/hailort-${HAILORT_VERSION}-cp313-cp313-linux_${WHL_ARCH}.whl"
+DEB_FILE="hailo-rt-5/hailort_${HAILORT_VERSION}_${DEB_ARCH}.deb"
+WHL_FILE="hailo-rt-5/hailort-${HAILORT_VERSION}-cp312-cp312-linux_${WHL_ARCH}.whl"
 
 MISSING=()
 for f in "$DEB_FILE" "$WHL_FILE"; do
@@ -58,7 +58,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     done
     echo ""
     echo "  Download from https://hailo.ai/developer-zone (requires account):"
-    echo "    - HailoRT Python package (whl) for Python 3.12, $ARCH"
+    echo "    - HailoRT 5.3.0 Python package (whl) for Python 3.12, $ARCH"
     echo "    - HailoRT Ubuntu package (deb) for $DEB_ARCH"
     exit 1
 fi
@@ -72,9 +72,13 @@ MODEL_FILES=(
     "arcface_r50.hef"
     "tinyclip_vit_39m_16_text_19m_yfcc15m_image_encoder.hef"
     "tinyclip_vit_39m_16_text_19m_yfcc15m_text_encoder.hef"
+    "siglip2_b_32_256_image_encoder.hef"
+    "siglip2_b_32_256_text_encoder.hef"
     "paddle_ocr_v5_mobile_detection.hef"
     "paddle_ocr_v5_mobile_recognition.hef"
     "bpe_simple_vocab_16e6.txt.gz"
+    "siglip2_tokenizer.json"
+    "siglip2_text_weights.npz"
     "ppocrv5_dict.txt"
 )
 
@@ -91,8 +95,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo ""
     echo "  $(red "Missing ${#MISSING[@]} model file(s):")"
 
-    HEF_BASE="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.17.0/hailo8l"
-    HEF_BASE_V218="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v2.18.0/hailo8l"
+    HEF_BASE="https://hailo-model-zoo.s3.eu-west-2.amazonaws.com/ModelZoo/Compiled/v5.4.0/hailo10h"
     BPE_URL="https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz"
     DICT_URL="https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/ppocrv5_dict.txt"
 
@@ -102,12 +105,14 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
         case "$f" in
             scrfd_2.5g.hef|arcface_r50.hef)
                 DOWNLOADS+=("$f|$HEF_BASE/$f") ;;
-            tinyclip_*|paddle_ocr_*)
-                DOWNLOADS+=("$f|$HEF_BASE_V218/$f") ;;
+            tinyclip_*|paddle_ocr_*|siglip2_*)
+                DOWNLOADS+=("$f|$HEF_BASE/$f") ;;
             bpe_simple_vocab_16e6.txt.gz)
                 DOWNLOADS+=("$f|$BPE_URL") ;;
             ppocrv5_dict.txt)
                 DOWNLOADS+=("$f|$DICT_URL") ;;
+            siglip2_tokenizer.json|siglip2_text_weights.npz)
+                : ;;
         esac
     done
 
@@ -152,18 +157,18 @@ docker build \
 
 ok "$IMAGE_BASE"
 
-# ── Step 4: Extract TinyCLIP text weights ─────────────────────────────
+# ── Step 4: Extract SigLIP2 text assets ───────────────────────────────
 
-step 4 "Extracting TinyCLIP text weights"
+step 4 "Extracting SigLIP2 text assets"
 
-if [[ -f "$SCRIPT_DIR/models/tinyclip_text_weights.npz" ]]; then
-    echo "  models/tinyclip_text_weights.npz already exists, skipping."
+if [[ -f "$SCRIPT_DIR/models/siglip2_text_weights.npz" && -f "$SCRIPT_DIR/models/siglip2_tokenizer.json" ]]; then
+    echo "  SigLIP2 text assets already exist, skipping."
     echo "  (Delete it to re-extract.)"
 else
-    "$SCRIPT_DIR/scripts/extract_tinyclip_weights.sh"
+    python3 "$SCRIPT_DIR/scripts/extract_siglip2_weights.py" --models-dir "$SCRIPT_DIR/models"
 fi
 
-ok "models/tinyclip_text_weights.npz"
+ok "models/siglip2_text_weights.npz"
 
 # ── Step 5: Build application image ───────────────────────────────────
 

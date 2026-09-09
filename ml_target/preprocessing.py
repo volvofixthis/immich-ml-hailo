@@ -12,11 +12,13 @@ LOG = logging.getLogger("ml_target.preprocessing")
 def resize_rgb(img_rgb: np.ndarray, w: int, h: int) -> np.ndarray:
     try:
         import cv2  # type: ignore
+
         return cv2.resize(img_rgb, (w, h), interpolation=cv2.INTER_LINEAR).astype(
             np.uint8, copy=False
         )
     except Exception:
         from PIL import Image
+
         return np.asarray(
             Image.fromarray(img_rgb).resize((w, h), resample=Image.BILINEAR),
             dtype=np.uint8,
@@ -50,7 +52,13 @@ def letterbox_rgb(
 
     LOG.info(
         "letterbox: orig=(%d,%d) new=(%d,%d) scale=%.6f pad=(%d,%d)",
-        w, h, new_w, new_h, scale, pad_x, pad_y,
+        w,
+        h,
+        new_w,
+        new_h,
+        scale,
+        pad_x,
+        pad_y,
     )
     return out, scale, pad_x, pad_y
 
@@ -102,6 +110,24 @@ def prep_clip_image(img_rgb_u8: np.ndarray, crop_size: int, input_format) -> np.
     return np.ascontiguousarray(x[None, ...], dtype=np.float32)
 
 
+def prep_siglip2_image(img_rgb_u8: np.ndarray, size: int) -> np.ndarray:
+    """Prepare the raw RGB UINT8 tensor expected by the SigLIP2 image HEF."""
+    try:
+        import cv2  # type: ignore
+
+        img = cv2.resize(img_rgb_u8, (size, size), interpolation=cv2.INTER_CUBIC)
+    except Exception:
+        from PIL import Image
+
+        img = np.asarray(
+            Image.fromarray(img_rgb_u8).resize(
+                (size, size), resample=Image.Resampling.BICUBIC
+            ),
+            dtype=np.uint8,
+        )
+    return np.ascontiguousarray(img[None, ...], dtype=np.uint8)
+
+
 def prep_clip_text_input(
     token_ids_77: np.ndarray,
     token_embedding: np.ndarray,
@@ -116,6 +142,30 @@ def prep_clip_text_input(
     x = token_embedding[token_ids_77] + positional_embedding  # (77, 512) float32
     x_u16 = np.clip(np.round(x / qp_scale + qp_zp), 0, 65535).astype(np.uint16)
     return np.ascontiguousarray(x_u16[None, None, ...], dtype=np.uint16)
+
+
+def prep_siglip2_text_input(
+    token_ids: np.ndarray,
+    token_embedding: np.ndarray,
+    positional_embedding: np.ndarray,
+    qp_scale: float,
+    qp_zp: float,
+) -> np.ndarray:
+    """Build and quantize the 1x64x768 input to the SigLIP2 text HEF."""
+    if token_ids.shape != (64,):
+        raise ValueError(f"token_ids must be (64,), got {token_ids.shape}")
+    if token_embedding.ndim != 2 or token_embedding.shape[1] != 768:
+        raise ValueError(f"unexpected token embedding shape: {token_embedding.shape}")
+    if positional_embedding.shape != (64, 768):
+        raise ValueError(
+            f"unexpected positional embedding shape: {positional_embedding.shape}"
+        )
+    if qp_scale <= 0:
+        raise ValueError(f"quantization scale must be positive, got {qp_scale}")
+
+    x = token_embedding[token_ids] + positional_embedding
+    x_u16 = np.clip(np.round(x / qp_scale + qp_zp), 0, 65535).astype(np.uint16)
+    return np.ascontiguousarray(x_u16[None, ...], dtype=np.uint16)
 
 
 def l2_normalize(v: np.ndarray) -> np.ndarray:
