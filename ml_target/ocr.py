@@ -190,9 +190,22 @@ def crop_text_region(
 class CTCDecoder:
     """CTC greedy decoder for PaddleOCR v5 recognition output."""
 
-    def __init__(self, char_dict_path: str, blank_index: int = 0):
-        self.blank_index = blank_index
+    def __init__(
+        self,
+        char_dict_path: str,
+        ignored_indices: Tuple[int, ...] = (0, 1),
+        expected_classes: Optional[int] = None,
+    ):
+        self.ignored_indices = set(ignored_indices)
         self.chars = self._load_dict(char_dict_path)
+        if expected_classes is not None:
+            actual_classes = len(self.chars) + len(self.ignored_indices)
+            if actual_classes != expected_classes:
+                raise ValueError(
+                    f"OCR dictionary/model mismatch: {char_dict_path} has "
+                    f"{len(self.chars)} characters + {len(self.ignored_indices)} "
+                    f"reserved indices, expected {expected_classes} classes"
+                )
         LOG.info("CTC decoder loaded: %d characters from %s", len(self.chars), char_dict_path)
 
     def _load_dict(self, path: str) -> List[str]:
@@ -229,10 +242,10 @@ class CTCDecoder:
                 if idx == prev_idx:
                     continue
                 prev_idx = idx
-                if idx == self.blank_index:
+                if idx in self.ignored_indices:
                     continue
-                # Map index to character (index 1 -> chars[0], etc.)
-                char_idx = idx - 1
+                # Reserved indices precede the dictionary entries.
+                char_idx = idx - len(self.ignored_indices)
                 if 0 <= char_idx < len(self.chars):
                     chars.append(self.chars[char_idx])
                     char_probs.append(float(probs[t]))

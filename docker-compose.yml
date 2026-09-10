@@ -11,6 +11,7 @@ services:
       - "3003:3003"
     environment:
       CLIP_BACKEND: siglip2
+      OCR_RECOGNITION_BACKEND: cyrillic
       MODELS_DIR: /app/models
     volumes:
       - /sys:/sys:ro

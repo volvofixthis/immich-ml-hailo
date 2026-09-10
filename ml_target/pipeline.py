@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import hailo_platform as hpf
 
-from ml_target.config import CLIP_BACKEND, OcrDetectionConfig, PipelineConfig
+from ml_target.config import (
+    CLIP_BACKEND,
+    OCR_RECOGNITION_BACKEND,
+    OcrDetectionConfig,
+    PipelineConfig,
+)
 from ml_target.decoders import decode_scrfd
 from ml_target.models import (
     HailoModel,
@@ -55,6 +60,13 @@ class _Timer:
 class Pipeline:
     def __init__(self, cfg: PipelineConfig):
         self.cfg = cfg
+        if OCR_RECOGNITION_BACKEND not in ("generic", "cyrillic"):
+            raise ValueError("OCR_RECOGNITION_BACKEND must be 'generic' or 'cyrillic'")
+        self.ocr_cfg = (
+            cfg.cyrillic_ocr_recognition
+            if OCR_RECOGNITION_BACKEND == "cyrillic"
+            else cfg.ocr_recognition
+        )
         self.clip_backend = os.environ.get("CLIP_BACKEND", CLIP_BACKEND).lower()
         if self.clip_backend not in ("tinyclip", "siglip2"):
             raise ValueError("CLIP_BACKEND must be 'tinyclip' or 'siglip2'")
@@ -140,8 +152,8 @@ class Pipeline:
         self.ocr_rec: Optional[HailoModel] = None
         self.ctc_decoder: Optional[CTCDecoder] = None
         ocr_det_path = cfg.hef_path(cfg.ocr_detection.hef)
-        ocr_rec_path = cfg.hef_path(cfg.ocr_recognition.hef)
-        char_dict_path = cfg.hef_path(cfg.ocr_recognition.char_dict)
+        ocr_rec_path = cfg.hef_path(self.ocr_cfg.hef)
+        char_dict_path = cfg.hef_path(self.ocr_cfg.char_dict)
         if (
             os.path.exists(ocr_det_path)
             and os.path.exists(ocr_rec_path)
@@ -159,9 +171,21 @@ class Pipeline:
                 input_format=hpf.FormatType.UINT8,
                 output_format=hpf.FormatType.FLOAT32,
             )
+            output_classes = {
+                shape[-1]
+                for shape in self.ocr_rec.output_shapes.values()
+                if shape
+            }
+            if self.ocr_cfg.expected_classes not in output_classes:
+                raise RuntimeError(
+                    f"OCR model/dictionary mismatch for {ocr_rec_path}: "
+                    f"expected {self.ocr_cfg.expected_classes} classes, "
+                    f"model outputs {sorted(output_classes)}"
+                )
             self.ctc_decoder = CTCDecoder(
                 char_dict_path,
-                blank_index=cfg.ocr_recognition.blank_index,
+                ignored_indices=self.ocr_cfg.ignored_indices,
+                expected_classes=self.ocr_cfg.expected_classes,
             )
             LOG.info(
                 "OCR models loaded: det=%s rec=%s dict=%s",
@@ -175,6 +199,10 @@ class Pipeline:
                 for p in [ocr_det_path, ocr_rec_path, char_dict_path]
                 if not os.path.exists(p)
             ]
+            if OCR_RECOGNITION_BACKEND == "cyrillic":
+                raise FileNotFoundError(
+                    "Cyrillic OCR assets are incomplete: " + ", ".join(missing)
+                )
             LOG.info("OCR disabled, missing files: %s", missing)
 
 
@@ -505,7 +533,7 @@ def _run_ocr(
     )
 
     det_cfg = cfg.ocr_detection
-    rec_cfg = cfg.ocr_recognition
+    rec_cfg = _PIPE.ocr_cfg
 
     # ── Step 1: Detection — letterbox to model input size ──
     with _Timer("ocr_letterbox"):

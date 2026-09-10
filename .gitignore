@@ -2,13 +2,20 @@
 __pycache__/
 *.pyc
 *.pyo
+.ropeproject/
+.venv/
+.install_logs/
+.mypy_cache/
 
 # Private / copyrighted files — not for publishing
 CLAUDE.md
 docs/
+!docs/
+!docs/russian-ocr.md
 
 # Keep directories but ignore contents (downloaded by user per README)
 hailo-rt-4/*
 !hailo-rt-4/.gitkeep
 models/*
 !models/.gitkeep
+*.log

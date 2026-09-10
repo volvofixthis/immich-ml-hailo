@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="360" viewBox="0 0 1000 360">
+  <rect width="1000" height="360" fill="white"/>
+  <g fill="black" font-family="Noto Sans" font-size="64">
+    <text x="32" y="78">Привет мир</text>
+    <text x="32" y="158">Москва 2026</text>
+    <text x="32" y="238">Русский текст</text>
+    <text x="32" y="318">Hello мир 123</text>
+  </g>
+</svg>

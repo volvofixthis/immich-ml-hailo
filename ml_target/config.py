@@ -16,6 +16,7 @@ from typing import List, Tuple
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "/app/models")
 CLIP_BACKEND = os.environ.get("CLIP_BACKEND", "siglip2").lower()
+OCR_RECOGNITION_BACKEND = os.environ.get("OCR_RECOGNITION_BACKEND", "generic").lower()
 
 
 @dataclass
@@ -137,8 +138,18 @@ class OcrRecognitionConfig:
     input_h: int = 48
     input_w: int = 320
     char_dict: str = "ppocrv5_dict.txt"
-    # CTC decode: index 0 = blank token
-    blank_index: int = 0
+    expected_classes: int = 18385
+    # PaddleOCR reserves blank and unknown at output indices 0 and 1.
+    ignored_indices: Tuple[int, ...] = (0, 1)
+
+
+@dataclass
+class CyrillicOcrRecognitionConfig(OcrRecognitionConfig):
+    """Cyrillic PP-OCRv5 assets compiled from the matching 852-class graph."""
+
+    hef: str = "cyrillic_ppocrv5_mobile_recognition.hef"
+    char_dict: str = "cyrillic_ppocrv5_mobile_rec_dict.txt"
+    expected_classes: int = 852
 
 
 @dataclass
@@ -152,6 +163,9 @@ class PipelineConfig:
     siglip2_text: Siglip2TextConfig = field(default_factory=Siglip2TextConfig)
     ocr_detection: OcrDetectionConfig = field(default_factory=OcrDetectionConfig)
     ocr_recognition: OcrRecognitionConfig = field(default_factory=OcrRecognitionConfig)
+    cyrillic_ocr_recognition: CyrillicOcrRecognitionConfig = field(
+        default_factory=CyrillicOcrRecognitionConfig
+    )
 
     def hef_path(self, filename: str) -> str:
         return os.path.join(self.models_dir, filename)
