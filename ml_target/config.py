@@ -139,8 +139,8 @@ class OcrRecognitionConfig:
     input_w: int = 320
     char_dict: str = "ppocrv5_dict.txt"
     expected_classes: int = 18385
-    # PaddleOCR reserves blank and unknown at output indices 0 and 1.
-    ignored_indices: Tuple[int, ...] = (0, 1)
+    # PaddleOCR uses index 0 for CTC blank and the final class for space.
+    ignored_indices: Tuple[int, ...] = (0,)
 
 
 @dataclass

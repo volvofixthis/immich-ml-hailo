@@ -10,11 +10,12 @@ cyrillic_PP-OCRv5_mobile_rec
 ```
 
 It uses a `48x320` recognition crop and produces `40x852` CTC logits. The
-matching dictionary contains 850 characters. Two output indices are reserved
-by PaddleOCR, so the dictionary and model must always be installed together:
+matching dictionary contains 850 characters. PaddleOCR adds one CTC blank
+class at index 0 and one trailing space class, so the dictionary and model
+must always be installed together:
 
 ```text
-850 dictionary entries + 2 reserved CTC indices = 852 output classes
+850 dictionary entries + blank + space = 852 output classes
 ```
 
 ## Requirements

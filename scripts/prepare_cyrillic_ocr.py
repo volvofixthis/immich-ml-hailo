@@ -73,7 +73,7 @@ def main() -> None:
         if dictionary_length + 2 != output_classes:
             raise ValueError(
                 f"Dictionary has {dictionary_length} entries but the model has "
-                f"{output_classes} classes (expected dictionary + 2 CTC tokens)"
+                f"{output_classes} classes (expected dictionary + blank + space)"
             )
 
     print(

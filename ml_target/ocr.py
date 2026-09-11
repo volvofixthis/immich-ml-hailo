@@ -206,18 +206,18 @@ class CTCDecoder:
     def __init__(
         self,
         char_dict_path: str,
-        ignored_indices: Tuple[int, ...] = (0, 1),
+        ignored_indices: Tuple[int, ...] = (0,),
         expected_classes: Optional[int] = None,
     ):
         self.ignored_indices = set(ignored_indices)
         self.chars = self._load_dict(char_dict_path)
         if expected_classes is not None:
-            actual_classes = len(self.chars) + len(self.ignored_indices)
+            actual_classes = len(self.chars) + len(self.ignored_indices) + 1
             if actual_classes != expected_classes:
                 raise ValueError(
                     f"OCR dictionary/model mismatch: {char_dict_path} has "
-                    f"{len(self.chars)} characters + {len(self.ignored_indices)} "
-                    f"reserved indices, expected {expected_classes} classes"
+                    f"{len(self.chars)} characters + blank + space, expected "
+                    f"{expected_classes} classes"
                 )
         LOG.info("CTC decoder loaded: %d characters from %s", len(self.chars), char_dict_path)
 
@@ -257,8 +257,12 @@ class CTCDecoder:
                 prev_idx = idx
                 if idx in self.ignored_indices:
                     continue
-                # Reserved indices precede the dictionary entries.
-                char_idx = idx - len(self.ignored_indices)
+                # PaddleOCR places space after the dictionary characters.
+                if idx == len(self.chars) + 1:
+                    chars.append(" ")
+                    char_probs.append(float(probs[t]))
+                    continue
+                char_idx = idx - 1
                 if 0 <= char_idx < len(self.chars):
                     chars.append(self.chars[char_idx])
                     char_probs.append(float(probs[t]))

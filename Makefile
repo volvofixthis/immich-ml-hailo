@@ -26,10 +26,12 @@ FINAL_HAR := $(WORK_DIR)/cyrillic_optimized.har
 COMPILE_DIR ?= $(WORK_DIR)/compile
 
 DOCKER_GPU ?= --gpus all
+HOST_USER ?= $(shell id -un)
 DOCKER_COMMON = --rm --shm-size=8g $(DOCKER_GPU) \
 	-v "$(ROOT):/workspace" \
 	-v "$(WORK_DIR):/work" \
 	-w /workspace \
+	-e USER=$(HOST_USER) \
 	-e NVIDIA_VISIBLE_DEVICES=all \
 	-e NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
