@@ -92,6 +92,19 @@ def decode_db_detection(
     return results
 
 
+def sort_text_regions_reading_order(
+    regions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return detected text regions in top-to-bottom, left-to-right order."""
+    return sorted(
+        regions,
+        key=lambda region: (
+            min(region["box"][1::2]),
+            min(region["box"][0::2]),
+        ),
+    )
+
+
 def _polygon_score(prob_map: np.ndarray, contour: np.ndarray) -> float:
     """Compute mean probability score inside a contour."""
     h, w = prob_map.shape[:2]

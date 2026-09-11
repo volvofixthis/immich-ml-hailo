@@ -7,7 +7,7 @@
 ## 2. Hailo compilation
 
 - [x] 2.1 Adapt the PP-OCRv5 Hailo recipe for the Cyrillic ONNX graph and output vocabulary; verify the parser accepts the graph.
-- [ ] 2.2 Build a representative Cyrillic calibration set and quantize for Hailo-10H; verify optimization completes without unsupported operators.
+- [x] 2.2 Build a representative Cyrillic calibration set and quantize for Hailo-10H; verify optimization completes without unsupported operators.
 - [ ] 2.3 Compile the recognition HEF and inspect it with `hailortcli parse-hef`; verify Hailo-10H compatibility and expected tensor shapes.
 
 ## 3. Worker integration

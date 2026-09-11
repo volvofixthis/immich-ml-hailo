@@ -34,7 +34,12 @@ from ml_target.preprocessing import (
     prep_siglip2_image,
     prep_siglip2_text_input,
 )
-from ml_target.ocr import CTCDecoder, crop_text_region, decode_db_detection
+from ml_target.ocr import (
+    CTCDecoder,
+    crop_text_region,
+    decode_db_detection,
+    sort_text_regions_reading_order,
+)
 from ml_target.tokenizer import Siglip2Tokenizer, SimpleTokenizer
 
 LOG = logging.getLogger("ml_target.pipeline")
@@ -581,6 +586,7 @@ def _run_ocr(
         orig_w=W0,
         orig_h=H0,
     )
+    text_regions = sort_text_regions_reading_order(text_regions)
 
     LOG.info("OCR: %d text regions detected", len(text_regions))
 

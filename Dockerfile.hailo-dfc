@@ -1,0 +1,35 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 python3.12-dev python3.12-venv python3-pip \
+    build-essential cmake git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.12 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1
+
+# Build this Dockerfile with ~/Downloads as the context so the private wheel
+# does not enter the repository.
+COPY hailo_dataflow_compiler-5.3.0-py3-none-linux_x86_64.whl /tmp/hailo_dataflow_compiler-5.3.0-py3-none-linux_x86_64.whl
+
+RUN pip install --no-cache-dir \
+    /tmp/hailo_dataflow_compiler-5.3.0-py3-none-linux_x86_64.whl \
+    && rm /tmp/hailo_dataflow_compiler-5.3.0-py3-none-linux_x86_64.whl
+
+# Additional export, graph-surgery, and GPU/XLA dependencies.
+RUN pip install --no-cache-dir \
+    --extra-index-url=https://pypi.ngc.nvidia.com \
+    paddlepaddle==3.0.0 \
+    paddle2onnx==2.1.0 \
+    onnxoptimizer \
+    nvidia-cuda-nvcc-cu12==12.8.93 \
+    'onnx-graphsurgeon>=0.3.27' \
+    Pillow \
+    PyYAML
+
+WORKDIR /workspace
+
+CMD ["hailo", "--version"]

@@ -46,6 +46,47 @@ package can be used as an alternative:
 .venv/bin/pip install 'nvidia-cuda-nvcc-cu12==12.8.93'
 ```
 
+## Build the DFC Docker Image
+
+The compiler image is separate from the runtime image. The private DFC wheel
+is kept outside the repository and supplied through a small Docker build
+context.
+
+From the repository root:
+
+```bash
+mkdir -p /tmp/hailo-dfc-context
+cp /home/loki/Downloads/hailo_dataflow_compiler-5.3.0-py3-none-linux_x86_64.whl \
+  /tmp/hailo-dfc-context/
+
+docker build \
+  -f /home/loki/projects/immich-ml-hailo/Dockerfile.hailo-dfc \
+  -t hailo-dfc:5.3.0 \
+  /tmp/hailo-dfc-context
+```
+
+Verify the image:
+
+```bash
+docker run --rm hailo-dfc:5.3.0
+```
+
+Expected output includes:
+
+```text
+Hailo Dataflow Compiler v5.3.0
+```
+
+Do not use the repository as the build context for this image. The Dockerfile
+expects the DFC wheel at the root of the context.
+
+The host needs NVIDIA Container Toolkit for GPU optimization:
+
+```bash
+docker run --rm --gpus all \
+  nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi
+```
+
 ## Download the Paddle Model
 
 Download the Paddle inference archive outside the repository:
@@ -153,6 +194,28 @@ For a production HEF, replace this with at least several hundred real crops
 from the target camera/library. Keep the same resize, right-padding, color
 order, and dtype as the worker's recognition input.
 
+One public source for Russian calibration images is the MIT-licensed
+[GOST Russian technical OCR dataset](https://github.com/Mkz-Prog/gost-ru-technical-ocr-dataset).
+It contains 1,000 labeled synthetic line images with Russian technical terms,
+part numbers, measurements, punctuation, and broad Cyrillic coverage. Clone
+it outside the repository with Git LFS, then convert the images:
+
+```bash
+git clone --depth 1 \
+  https://github.com/Mkz-Prog/gost-ru-technical-ocr-dataset.git \
+  /tmp/gost-ru-technical-ocr-dataset
+git -C /tmp/gost-ru-technical-ocr-dataset lfs install --local
+git -C /tmp/gost-ru-technical-ocr-dataset lfs pull
+
+.venv/bin/python scripts/create_calibration_from_images.py \
+  --images-dir /tmp/gost-ru-technical-ocr-dataset/ocr_dataset \
+  --output /tmp/gost_ru_cyrillic_calibration.npy
+```
+
+Mix this dataset with real crops from the Immich workload before the final
+level-4 quantization build. Its labels can also be used for held-out CER/WER
+evaluation, although labels are not consumed by calibration itself.
+
 ## Quantize
 
 The development recipe uses optimization level 1:
@@ -173,6 +236,30 @@ mkdir -p /tmp/cyrillic_fast_opt
   --model-script scripts/cyrillic_paddle_ocr_v5_mobile_recognition_fast.alls \
   --output-har-path /tmp/cyrillic_fast_optimized.har \
   --work-dir /tmp/cyrillic_fast_opt
+```
+
+The same level-1 optimization can run in the DFC container. The repository
+and `/tmp` are mounted so the container can use the prepared HAR, calibration
+array, and compiler outputs:
+
+```bash
+docker run --rm --gpus all --shm-size=8g \
+  -v "$PWD:/workspace" \
+  -v /tmp:/tmp \
+  -w /workspace \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  hailo-dfc:5.3.0 \
+  bash -lc '
+    mkdir -p /tmp/cyrillic_fast_opt &&
+    hailo optimize \
+      /tmp/cyrillic_prepared.har \
+      --hw-arch hailo10h \
+      --calib-set-path /tmp/cyrillic_calibration.npy \
+      --model-script /workspace/scripts/cyrillic_paddle_ocr_v5_mobile_recognition_fast.alls \
+      --output-har-path /tmp/cyrillic_fast_optimized.har \
+      --work-dir /tmp/cyrillic_fast_opt
+  '
 ```
 
 `CUDA_VISIBLE_DEVICES=''` hides all CUDA GPUs from the command and forces
@@ -207,6 +294,36 @@ scripts/cyrillic_paddle_ocr_v5_mobile_recognition.alls
 This is the level-4 Model Zoo-style recipe. It performs more aggressive
 optimization and can take substantially longer, especially on CPU.
 
+Adaround creates large temporary caches. Do not place the optimization work
+directory on a small `/tmp` tmpfs. The Makefile uses `.work/cyrillic-ocr` on
+the repository filesystem by default. Override it when needed:
+
+```bash
+make WORK_DIR=/path/with/at-least-20G-free optimize-level4
+```
+
+Use the real Russian calibration array for the level-4 build:
+
+```bash
+docker run --rm --gpus all --shm-size=8g \
+  -v "$PWD:/workspace" \
+  -v /tmp:/tmp \
+  -w /workspace \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+  hailo-dfc:5.3.0 \
+  bash -lc '
+    mkdir -p /tmp/cyrillic_opt &&
+    hailo optimize \
+      /tmp/cyrillic_prepared.har \
+      --hw-arch hailo10h \
+      --calib-set-path /tmp/gost_ru_cyrillic_calibration.npy \
+      --model-script /workspace/scripts/cyrillic_paddle_ocr_v5_mobile_recognition.alls \
+      --output-har-path /tmp/cyrillic_optimized.har \
+      --work-dir /tmp/cyrillic_opt
+  '
+```
+
 ## Compile the HEF
 
 Compile the optimized HAR for Hailo-10H:
@@ -219,6 +336,24 @@ mkdir -p /tmp/cyrillic_compile
   --hw-arch hailo10h \
   --model-script scripts/cyrillic_paddle_ocr_v5_mobile_recognition_fast.alls \
   --output-dir /tmp/cyrillic_compile
+```
+
+Compile the level-4 HAR in the DFC container:
+
+```bash
+docker run --rm --shm-size=8g \
+  -v "$PWD:/workspace" \
+  -v /tmp:/tmp \
+  -w /workspace \
+  hailo-dfc:5.3.0 \
+  bash -lc '
+    mkdir -p /tmp/cyrillic_compile &&
+    hailo compiler \
+      /tmp/cyrillic_optimized.har \
+      --hw-arch hailo10h \
+      --model-script /workspace/scripts/cyrillic_paddle_ocr_v5_mobile_recognition.alls \
+      --output-dir /tmp/cyrillic_compile
+  '
 ```
 
 Do not compile the parsed or full-precision HAR. Hailo hardware requires
